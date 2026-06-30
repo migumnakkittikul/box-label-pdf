@@ -15,7 +15,7 @@ func generate(inPath, invoice, outPath string) (genResult, error) {
 		return genResult{}, err
 	}
 	labels := BuildLabels(branches, invoice)
-	if err := RenderPDF(labels, outPath); err != nil {
+	if err := RenderPDF(labels, outPath, thaiFont); err != nil {
 		return genResult{}, err
 	}
 	return genResult{

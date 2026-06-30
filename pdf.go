@@ -18,9 +18,6 @@ const (
 	nBodyRow = 6             // 5 info fields + footer
 )
 
-// fontPath is the label font, loaded from disk for now.
-const fontPath = "assets/Sarabun-Bold.ttf"
-
 // the five key labels, in order
 var keyLabels = [5]string{"บริษัทผู้ส่ง", "รหัสบริษัท", "เลขที่ใบกำกับ", "รหัสสาขา", "สาขาผู้รับ"}
 
@@ -30,8 +27,8 @@ const (
 )
 
 // RenderPDF writes the label PDF, one label per page, in order.
-func RenderPDF(labels []Label, outPath string) error {
-	pdf, err := buildPDF(labels)
+func RenderPDF(labels []Label, outPath string, fontData []byte) error {
+	pdf, err := buildPDF(labels, fontData)
 	if err != nil {
 		return err
 	}
@@ -39,10 +36,10 @@ func RenderPDF(labels []Label, outPath string) error {
 }
 
 // buildPDF builds the document in memory so it can be inspected in tests.
-func buildPDF(labels []Label) (*gopdf.GoPdf, error) {
+func buildPDF(labels []Label, fontData []byte) (*gopdf.GoPdf, error) {
 	pdf := &gopdf.GoPdf{}
 	pdf.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4})
-	if err := pdf.AddTTFFont("label", fontPath); err != nil {
+	if err := pdf.AddTTFFontData("label", fontData); err != nil {
 		return nil, fmt.Errorf("load font: %w", err)
 	}
 	L := 500.0

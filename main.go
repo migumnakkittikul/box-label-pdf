@@ -11,5 +11,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
-	fmt.Printf("%d branches\n", len(branches))
+	labels := BuildLabels(branches, "IV-0001")
+	fmt.Printf("%d branches, %d labels, %d pages\n",
+		len(branches), len(labels), PageCount(len(labels)))
 }

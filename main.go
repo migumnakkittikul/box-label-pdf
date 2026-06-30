@@ -6,6 +6,10 @@ import (
 )
 
 func main() {
-	fmt.Fprintln(os.Stderr, "usage: box-label-pdf <input.xlsx> <invoice> <output.pdf>")
-	os.Exit(2)
+	_, branches, err := ReadBranches("sample.xlsx")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("%d branches\n", len(branches))
 }

@@ -24,6 +24,9 @@ const (
 	medLine  = 1.0           // medium border line width (pt)
 )
 
+// Page layout: each page IS a 100x100mm sticker, one label per page.
+const pageMM = 100.0 // sticker stock size (10x10cm)
+
 // the five key labels, in order
 var keyLabels = [5]string{"บริษัทผู้ส่ง", "รหัสบริษัท", "เลขที่ใบกำกับ", "รหัสสาขา", "สาขาผู้รับ"}
 
@@ -61,7 +64,8 @@ func RenderPDF(labels []Label, outPath string, fontData []byte) error {
 // buildPDF builds the document in memory so it can be inspected in tests.
 func buildPDF(labels []Label, fontData []byte) (*gopdf.GoPdf, error) {
 	pdf := &gopdf.GoPdf{}
-	pdf.Start(gopdf.Config{PageSize: *gopdf.PageSizeA4})
+	page := pageMM * mm2pt
+	pdf.Start(gopdf.Config{PageSize: gopdf.Rect{W: page, H: page}})
 	if err := pdf.AddTTFFontData("label", fontData); err != nil {
 		return nil, fmt.Errorf("load font: %w", err)
 	}
@@ -74,7 +78,7 @@ func buildPDF(labels []Label, fontData []byte) (*gopdf.GoPdf, error) {
 		return nil, fmt.Errorf("right logo: %w", err)
 	}
 
-	L := 500.0
+	L := pageMM * mm2pt
 	for _, lab := range labels {
 		pdf.AddPage()
 		drawLabel(pdf, 0, 0, L, lab, left, right)

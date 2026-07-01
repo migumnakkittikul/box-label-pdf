@@ -18,9 +18,10 @@ const mm2pt = 72.0 / 25.4
 const (
 	fHeader  = 0.156         // header (logos) band height
 	fColKey  = 0.366         // right edge of the key column
-	fDivider = 0.395         // key+colon | value boundary
+	fDivider = 0.395         // key+colon | value boundary; header & footer divider x
 	fFont    = 72.0 / 843.75 // font size as a fraction of L (~24pt at 100mm)
 	nBodyRow = 6             // 5 info fields + footer
+	medLine  = 1.0           // medium border line width (pt)
 )
 
 // the five key labels, in order
@@ -91,27 +92,39 @@ func drawLabel(pdf *gopdf.GoPdf, ox, oy, L float64, lab Label, left, right logoI
 	valW := L - dividerX
 	footerY := headerH + 5*rowH
 	pad := L * 0.02
+	valMaxW := valW - 2*pad
 	fontSize := L * fFont
 
+	pdf.SetStrokeColor(0, 0, 0)
 	pdf.SetTextColor(0, 0, 0)
 
 	// logos in the header band
 	placeLogo(pdf, ox+pad, oy+pad, dividerX-2*pad, headerH-2*pad, left)
 	placeLogo(pdf, ox+dividerX+pad, oy+pad, valW-2*pad, headerH-2*pad, right)
 
+	// medium black lines
+	pdf.SetLineWidth(medLine)
+	pdf.RectFromUpperLeftWithStyle(ox, oy, L, L, "D")    // outer box
+	pdf.Line(ox+dividerX, oy, ox+dividerX, oy+headerH)   // header divider (between logos)
+	pdf.Line(ox, oy+headerH, ox+L, oy+headerH)           // under header
+	pdf.Line(ox, oy+footerY, ox+L, oy+footerY)           // above footer
+	pdf.Line(ox+dividerX, oy+footerY, ox+dividerX, oy+L) // footer divider
+
 	pdf.SetFont("label", "", fontSize)
 
+	// 5 info fields: key : value
 	values := [5]string{lab.Sender, lab.CompanyCode, lab.Invoice, lab.BranchCode, lab.BranchName}
 	for i := 0; i < 5; i++ {
 		fy := oy + headerH + float64(i)*rowH
 		drawCell(pdf, ox+pad, fy, keyW-pad, rowH, keyLabels[i], gopdf.Left|gopdf.Middle)
 		drawCell(pdf, ox+keyW, fy, colonW, rowH, ":", gopdf.Center|gopdf.Middle)
-		drawCell(pdf, ox+dividerX+pad, fy, valW-pad, rowH, values[i], gopdf.Left|gopdf.Middle)
+		drawCell(pdf, ox+dividerX+pad, fy, valMaxW, rowH, values[i], gopdf.Left|gopdf.Middle)
 	}
 
-	// footer line
+	// footer: กล่องที่___ | จำนวนรวม___
 	fy := oy + footerY
-	drawCell(pdf, ox+pad, fy, valW, rowH, footerLeft+"  "+footerRight, gopdf.Left|gopdf.Middle)
+	drawCell(pdf, ox+pad, fy, dividerX-2*pad, rowH, footerLeft, gopdf.Center|gopdf.Middle)
+	drawCell(pdf, ox+dividerX+pad, fy, valMaxW, rowH, footerRight, gopdf.Center|gopdf.Middle)
 }
 
 func placeLogo(pdf *gopdf.GoPdf, x, y, cw, ch float64, img logoImg) {

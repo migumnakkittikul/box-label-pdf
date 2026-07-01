@@ -1,17 +1,22 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"math"
 
 	"github.com/signintech/gopdf"
 )
 
 const mm2pt = 72.0 / 25.4
 
-// Label geometry as fractions of the side length L: the header band, the
+// Label geometry as fractions of the side length L: the header (logo) band, the
 // key/colon/value column splits, and the body font size.
 const (
-	fHeader  = 0.156         // header band height
+	fHeader  = 0.156         // header (logos) band height
 	fColKey  = 0.366         // right edge of the key column
 	fDivider = 0.395         // key+colon | value boundary
 	fFont    = 72.0 / 843.75 // font size as a fraction of L (~24pt at 100mm)
@@ -25,6 +30,23 @@ const (
 	footerLeft  = "กล่องที่_______"
 	footerRight = "จำนวนรวม__________"
 )
+
+type logoImg struct {
+	holder gopdf.ImageHolder
+	w, h   float64 // intrinsic pixel dimensions
+}
+
+func loadLogo(b []byte) (logoImg, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(b))
+	if err != nil {
+		return logoImg{}, err
+	}
+	h, err := gopdf.ImageHolderByBytes(b)
+	if err != nil {
+		return logoImg{}, err
+	}
+	return logoImg{holder: h, w: float64(cfg.Width), h: float64(cfg.Height)}, nil
+}
 
 // RenderPDF writes the label PDF, one label per page, in order.
 func RenderPDF(labels []Label, outPath string, fontData []byte) error {
@@ -42,16 +64,25 @@ func buildPDF(labels []Label, fontData []byte) (*gopdf.GoPdf, error) {
 	if err := pdf.AddTTFFontData("label", fontData); err != nil {
 		return nil, fmt.Errorf("load font: %w", err)
 	}
+	left, err := loadLogo(logoLeft)
+	if err != nil {
+		return nil, fmt.Errorf("left logo: %w", err)
+	}
+	right, err := loadLogo(logoRight)
+	if err != nil {
+		return nil, fmt.Errorf("right logo: %w", err)
+	}
+
 	L := 500.0
 	for _, lab := range labels {
 		pdf.AddPage()
-		drawLabel(pdf, 0, 0, L, lab)
+		drawLabel(pdf, 0, 0, L, lab, left, right)
 	}
 	return pdf, nil
 }
 
 // drawLabel draws one label with its upper-left corner at (ox, oy).
-func drawLabel(pdf *gopdf.GoPdf, ox, oy, L float64, lab Label) {
+func drawLabel(pdf *gopdf.GoPdf, ox, oy, L float64, lab Label, left, right logoImg) {
 	headerH := L * fHeader
 	rowH := (L - headerH) / nBodyRow
 	dividerX := L * fDivider
@@ -63,6 +94,11 @@ func drawLabel(pdf *gopdf.GoPdf, ox, oy, L float64, lab Label) {
 	fontSize := L * fFont
 
 	pdf.SetTextColor(0, 0, 0)
+
+	// logos in the header band
+	placeLogo(pdf, ox+pad, oy+pad, dividerX-2*pad, headerH-2*pad, left)
+	placeLogo(pdf, ox+dividerX+pad, oy+pad, valW-2*pad, headerH-2*pad, right)
+
 	pdf.SetFont("label", "", fontSize)
 
 	values := [5]string{lab.Sender, lab.CompanyCode, lab.Invoice, lab.BranchCode, lab.BranchName}
@@ -76,6 +112,12 @@ func drawLabel(pdf *gopdf.GoPdf, ox, oy, L float64, lab Label) {
 	// footer line
 	fy := oy + footerY
 	drawCell(pdf, ox+pad, fy, valW, rowH, footerLeft+"  "+footerRight, gopdf.Left|gopdf.Middle)
+}
+
+func placeLogo(pdf *gopdf.GoPdf, x, y, cw, ch float64, img logoImg) {
+	s := math.Min(cw/img.w, ch/img.h)
+	w, h := img.w*s, img.h*s
+	pdf.ImageByHolder(img.holder, x+(cw-w)/2, y+(ch-h)/2, &gopdf.Rect{W: w, H: h})
 }
 
 func drawCell(pdf *gopdf.GoPdf, x, y, w, h float64, text string, align int) {

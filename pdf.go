@@ -27,14 +27,6 @@ const (
 // Page layout: each page IS a 100x100mm sticker, one label per page.
 const pageMM = 100.0 // sticker stock size (10x10cm)
 
-// the five key labels, in order
-var keyLabels = [5]string{"บริษัทผู้ส่ง", "รหัสบริษัท", "เลขที่ใบกำกับ", "รหัสสาขา", "สาขาผู้รับ"}
-
-const (
-	footerLeft  = "กล่องที่_______"
-	footerRight = "จำนวนรวม__________"
-)
-
 type logoImg struct {
 	holder gopdf.ImageHolder
 	w, h   float64 // intrinsic pixel dimensions
@@ -52,7 +44,7 @@ func loadLogo(b []byte) (logoImg, error) {
 	return logoImg{holder: h, w: float64(cfg.Width), h: float64(cfg.Height)}, nil
 }
 
-// RenderPDF writes the label PDF, one label per page, in order.
+// RenderPDF writes the label PDF: one 100x100mm label per page, in order.
 func RenderPDF(labels []Label, outPath string, fontData []byte) error {
 	pdf, err := buildPDF(labels, fontData)
 	if err != nil {
@@ -61,7 +53,8 @@ func RenderPDF(labels []Label, outPath string, fontData []byte) error {
 	return pdf.WritePdf(outPath)
 }
 
-// buildPDF builds the document in memory so it can be inspected in tests.
+// buildPDF builds the document in memory (no file I/O), so it can be benchmarked
+// and inspected in tests.
 func buildPDF(labels []Label, fontData []byte) (*gopdf.GoPdf, error) {
 	pdf := &gopdf.GoPdf{}
 	page := pageMM * mm2pt
@@ -79,58 +72,104 @@ func buildPDF(labels []Label, fontData []byte) (*gopdf.GoPdf, error) {
 	}
 
 	L := pageMM * mm2pt
+	lay := newLabelLayout(pdf, L)
 	for _, lab := range labels {
 		pdf.AddPage()
-		drawLabel(pdf, 0, 0, L, lab, left, right)
+		lay.draw(pdf, 0, 0, lab, left, right)
 	}
 	return pdf, nil
 }
 
-// drawLabel draws one label with its upper-left corner at (ox, oy).
-func drawLabel(pdf *gopdf.GoPdf, ox, oy, L float64, lab Label, left, right logoImg) {
-	headerH := L * fHeader
-	rowH := (L - headerH) / nBodyRow
-	dividerX := L * fDivider
-	keyW := L * fColKey
-	colonW := dividerX - keyW
-	valW := L - dividerX
-	footerY := headerH + 5*rowH
-	pad := L * 0.02
-	valMaxW := valW - 2*pad
+// the five key labels, in order (constant for every label)
+var keyLabels = [5]string{"บริษัทผู้ส่ง", "รหัสบริษัท", "เลขที่ใบกำกับ", "รหัสสาขา", "สาขาผู้รับ"}
+
+const (
+	footerLeft  = "กล่องที่_______"
+	footerRight = "จำนวนรวม__________"
+)
+
+// labelLayout holds the geometry and font sizes that are identical for every label,
+// computed once. The per-value fit size is memoized so each distinct value (the
+// constant sender line, each branch name) is measured only once across the whole run.
+type labelLayout struct {
+	pdf                          *gopdf.GoPdf
+	L, headerH, rowH             float64
+	dividerX, keyW, colonW, valW float64
+	footerY, pad, valMaxW        float64
+	bodySize                     float64 // uniform key size
+	flSize, frSize               float64 // footer sizes
+	valCache                     map[string]float64
+}
+
+func newLabelLayout(pdf *gopdf.GoPdf, L float64) *labelLayout {
+	l := &labelLayout{pdf: pdf, L: L, valCache: map[string]float64{}}
+	l.headerH = L * fHeader
+	l.rowH = (L - l.headerH) / nBodyRow
+	l.dividerX = L * fDivider
+	l.keyW = L * fColKey
+	l.colonW = l.dividerX - l.keyW
+	l.valW = L - l.dividerX
+	l.footerY = l.headerH + 5*l.rowH
+	l.pad = L * 0.02
+	l.valMaxW = l.valW - 2*l.pad
 	fontSize := L * fFont
 
+	// Keys share one size, shrunk just enough that the longest key fits its column.
+	// A narrow font yields a larger size, a wider font a smaller one.
+	keyItems := make([]fitItem, len(keyLabels))
+	for i, k := range keyLabels {
+		keyItems[i] = fitItem{k, l.keyW - l.pad}
+	}
+	l.bodySize = fitUniform(pdf, fontSize, keyItems)
+	l.flSize = fitUniform(pdf, fontSize, []fitItem{{footerLeft, l.dividerX - 2*l.pad}})
+	l.frSize = fitUniform(pdf, fontSize, []fitItem{{footerRight, l.valMaxW}})
+	return l
+}
+
+// valSize returns the (memoized) font size for a value: bodySize, shrunk on its own
+// only if the value would otherwise cross the right border.
+func (l *labelLayout) valSize(text string) float64 {
+	if v, ok := l.valCache[text]; ok {
+		return v
+	}
+	v := fitUniform(l.pdf, l.bodySize, []fitItem{{text, l.valMaxW}})
+	l.valCache[text] = v
+	return v
+}
+
+func (l *labelLayout) draw(pdf *gopdf.GoPdf, ox, oy float64, lab Label, left, right logoImg) {
 	pdf.SetStrokeColor(0, 0, 0)
 	pdf.SetTextColor(0, 0, 0)
 
 	// logos in the header band
-	placeLogo(pdf, ox+pad, oy+pad, dividerX-2*pad, headerH-2*pad, left)
-	placeLogo(pdf, ox+dividerX+pad, oy+pad, valW-2*pad, headerH-2*pad, right)
+	placeLogo(pdf, ox+l.pad, oy+l.pad, l.dividerX-2*l.pad, l.headerH-2*l.pad, left)
+	placeLogo(pdf, ox+l.dividerX+l.pad, oy+l.pad, l.valW-2*l.pad, l.headerH-2*l.pad, right)
 
 	// medium black lines
 	pdf.SetLineWidth(medLine)
-	pdf.RectFromUpperLeftWithStyle(ox, oy, L, L, "D")    // outer box
-	pdf.Line(ox+dividerX, oy, ox+dividerX, oy+headerH)   // header divider (between logos)
-	pdf.Line(ox, oy+headerH, ox+L, oy+headerH)           // under header
-	pdf.Line(ox, oy+footerY, ox+L, oy+footerY)           // above footer
-	pdf.Line(ox+dividerX, oy+footerY, ox+dividerX, oy+L) // footer divider
+	pdf.RectFromUpperLeftWithStyle(ox, oy, l.L, l.L, "D")        // outer box
+	pdf.Line(ox+l.dividerX, oy, ox+l.dividerX, oy+l.headerH)     // header divider (between logos)
+	pdf.Line(ox, oy+l.headerH, ox+l.L, oy+l.headerH)             // under header
+	pdf.Line(ox, oy+l.footerY, ox+l.L, oy+l.footerY)             // above footer
+	pdf.Line(ox+l.dividerX, oy+l.footerY, ox+l.dividerX, oy+l.L) // footer divider
 
 	// 5 info fields: key : value
 	values := [5]string{lab.Sender, lab.CompanyCode, lab.Invoice, lab.BranchCode, lab.BranchName}
 	for i := 0; i < 5; i++ {
-		fy := oy + headerH + float64(i)*rowH
-		pdf.SetFont("label", "", fontSize)
-		drawCell(pdf, ox+pad, fy, keyW-pad, rowH, keyLabels[i], gopdf.Left|gopdf.Middle)
-		drawCell(pdf, ox+keyW, fy, colonW, rowH, ":", gopdf.Center|gopdf.Middle)
-		// shrink just this value if it would otherwise cross the right border
-		pdf.SetFont("label", "", fitUniform(pdf, fontSize, []fitItem{{values[i], valMaxW}}))
-		drawCell(pdf, ox+dividerX+pad, fy, valMaxW, rowH, values[i], gopdf.Left|gopdf.Middle)
+		fy := oy + l.headerH + float64(i)*l.rowH
+		pdf.SetFont("label", "", l.bodySize)
+		drawCell(pdf, ox+l.pad, fy, l.keyW-l.pad, l.rowH, keyLabels[i], gopdf.Left|gopdf.Middle)
+		drawCell(pdf, ox+l.keyW, fy, l.colonW, l.rowH, ":", gopdf.Center|gopdf.Middle)
+		pdf.SetFont("label", "", l.valSize(values[i]))
+		drawCell(pdf, ox+l.dividerX+l.pad, fy, l.valMaxW, l.rowH, values[i], gopdf.Left|gopdf.Middle)
 	}
 
 	// footer: กล่องที่___ | จำนวนรวม___
-	fy := oy + footerY
-	pdf.SetFont("label", "", fontSize)
-	drawCell(pdf, ox+pad, fy, dividerX-2*pad, rowH, footerLeft, gopdf.Center|gopdf.Middle)
-	drawCell(pdf, ox+dividerX+pad, fy, valMaxW, rowH, footerRight, gopdf.Center|gopdf.Middle)
+	fy := oy + l.footerY
+	pdf.SetFont("label", "", l.flSize)
+	drawCell(pdf, ox+l.pad, fy, l.dividerX-2*l.pad, l.rowH, footerLeft, gopdf.Center|gopdf.Middle)
+	pdf.SetFont("label", "", l.frSize)
+	drawCell(pdf, ox+l.dividerX+l.pad, fy, l.valMaxW, l.rowH, footerRight, gopdf.Center|gopdf.Middle)
 }
 
 type fitItem struct {

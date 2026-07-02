@@ -114,21 +114,47 @@ func drawLabel(pdf *gopdf.GoPdf, ox, oy, L float64, lab Label, left, right logoI
 	pdf.Line(ox, oy+footerY, ox+L, oy+footerY)           // above footer
 	pdf.Line(ox+dividerX, oy+footerY, ox+dividerX, oy+L) // footer divider
 
-	pdf.SetFont("label", "", fontSize)
-
 	// 5 info fields: key : value
 	values := [5]string{lab.Sender, lab.CompanyCode, lab.Invoice, lab.BranchCode, lab.BranchName}
 	for i := 0; i < 5; i++ {
 		fy := oy + headerH + float64(i)*rowH
+		pdf.SetFont("label", "", fontSize)
 		drawCell(pdf, ox+pad, fy, keyW-pad, rowH, keyLabels[i], gopdf.Left|gopdf.Middle)
 		drawCell(pdf, ox+keyW, fy, colonW, rowH, ":", gopdf.Center|gopdf.Middle)
+		// shrink just this value if it would otherwise cross the right border
+		pdf.SetFont("label", "", fitUniform(pdf, fontSize, []fitItem{{values[i], valMaxW}}))
 		drawCell(pdf, ox+dividerX+pad, fy, valMaxW, rowH, values[i], gopdf.Left|gopdf.Middle)
 	}
 
 	// footer: กล่องที่___ | จำนวนรวม___
 	fy := oy + footerY
+	pdf.SetFont("label", "", fontSize)
 	drawCell(pdf, ox+pad, fy, dividerX-2*pad, rowH, footerLeft, gopdf.Center|gopdf.Middle)
 	drawCell(pdf, ox+dividerX+pad, fy, valMaxW, rowH, footerRight, gopdf.Center|gopdf.Middle)
+}
+
+type fitItem struct {
+	text string
+	maxW float64
+}
+
+// fitUniform returns the largest size <= base at which every item fits its maxW.
+func fitUniform(pdf *gopdf.GoPdf, base float64, items []fitItem) float64 {
+	for s := base; s > 6; s -= 0.5 {
+		pdf.SetFont("label", "", s)
+		ok := true
+		for _, it := range items {
+			w, err := pdf.MeasureTextWidth(it.text)
+			if err == nil && w > it.maxW {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return s
+		}
+	}
+	return 6
 }
 
 func placeLogo(pdf *gopdf.GoPdf, x, y, cw, ch float64, img logoImg) {
